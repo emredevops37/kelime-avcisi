@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kelime Avcısı</title>
+<meta name="description" content="Altyazılı videolardan İngilizce kelime yakala, aralıklı tekrarla öğren.">
+<meta name="theme-color" content="#121110">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Kelime Avcısı">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Hazine paraları için ortak gradyanlar -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="g-ore" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a39380"/><stop offset="1" stop-color="#5f5446"/>
+    </linearGradient>
+    <radialGradient id="g-gold" cx=".35" cy=".3" r=".8">
+      <stop offset="0" stop-color="#fff2b0"/><stop offset=".45" stop-color="#f2c230"/><stop offset="1" stop-color="#a87400"/>
+    </radialGradient>
+    <linearGradient id="g-gem" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9ff3ff"/><stop offset=".5" stop-color="#5b8cff"/><stop offset="1" stop-color="#8a3cff"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 64 64" width="26" height="26" aria-hidden="true"><circle cx="32" cy="32" r="26" fill="url(#g-gold)" stroke="#9c6f00" stroke-width="3"/><text x="32" y="41" text-anchor="middle" font-size="26" font-weight="800" fill="#7a5200">K</text></svg>
+    <span>Kelime Avcısı</span>
+  </div>
+  <nav class="tabs">
+    <button data-view="feed" class="on">Akış</button>
+    <button data-view="review">Tekrar <span class="badge" id="dueBadge" hidden></span></button>
+    <button data-view="treasure">Hazine <span class="badge soft" id="wordBadge" hidden></span></button>
+    <button data-view="settings" aria-label="Ayarlar">Ayarlar</button>
+  </nav>
+</header>
+
+<main>
+  <section class="view on" id="feedView">
+    <div class="feed" id="feed"></div>
+    <div class="welcome" id="welcome"></div>
+    <button class="libbtn" data-act="open-lib" id="libBtn" hidden>Videolar</button>
+  </section>
+
+  <section class="view" id="reviewView">
+    <div class="page" id="review"></div>
+    <video id="rvVideo" playsinline hidden></video>
+  </section>
+
+  <section class="view" id="treasureView">
+    <div class="page" id="treasure"></div>
+  </section>
+
+  <section class="view" id="settingsView">
+    <div class="page settings">
+      <h1>Ayarlar</h1>
+
+      <div class="group">
+        <h3>Görünüm</h3>
+        <label class="row"><span>Tema</span>
+          <select data-setting="theme">
+            <option value="auto">Sistem</option><option value="light">Açık</option><option value="dark">Koyu</option>
+          </select>
+        </label>
+        <label class="row"><span>Anlam dili</span>
+          <select data-setting="lang" id="langSelect"></select>
+        </label>
+      </div>
+
+      <div class="group">
+        <h3>Akış</h3>
+        <label class="row"><span>Uzun videoları kısa kliplere böl</span><input type="checkbox" data-setting="split"></label>
+        <label class="row"><span>Klip uzunluğu (saniye)</span><input type="number" min="15" max="300" step="5" data-setting="clipLen"></label>
+        <label class="row"><span>Klipleri karıştır</span><input type="checkbox" data-setting="shuffle"></label>
+        <label class="row"><span>Klip bitince</span>
+          <select data-setting="onEnd"><option value="loop">Baştan oynat</option><option value="next">Sonrakine geç</option></select>
+        </label>
+        <label class="row"><span>Kelime kartı kapanınca videoya devam et</span><input type="checkbox" data-setting="resumeAfterSheet"></label>
+      </div>
+
+      <div class="group">
+        <h3>Çeviri kotası</h3>
+        <p class="hint">Çeviriler MyMemory'nin ücretsiz servisinden gelir (anonim kullanımda günde ~5.000 karakter). Buraya bir e-posta yazarsan kota günde ~50.000 karaktere çıkar. E-posta yalnızca MyMemory'ye gönderilir.</p>
+        <label class="row"><span>E-posta (isteğe bağlı)</span><input type="email" data-setting="email" placeholder="ornek@mail.com"></label>
+      </div>
+
+      <div class="group" id="installGroup" hidden>
+        <h3>Uygulama</h3>
+        <p class="hint" id="installHint"></p>
+        <div class="btns"><button class="primary" data-act="install" id="installBtn" hidden>Ana ekrana yükle</button></div>
+      </div>
+
+      <div class="group">
+        <h3>Hazine verisi</h3>
+        <p class="hint">Kelimelerin bu tarayıcıda saklanır. Başka bir tarayıcıya ya da bilgisayara taşımak için dışa aktar.</p>
+        <div class="btns">
+          <button data-act="export">Dışa aktar (.json)</button>
+          <button data-act="import">İçe aktar</button>
+          <button data-act="clear-cache">Sözlük önbelleğini temizle</button>
+          <button class="danger" data-act="wipe">Tüm kelimeleri sil</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>Klavye kısayolları</h3>
+        <table class="keys">
+          <tr><td><kbd>Boşluk</kbd></td><td>Oynat / duraklat (Tekrar'da: anlamı göster)</td></tr>
+          <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Önceki / sonraki klip</td></tr>
+          <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Önceki / sonraki cümle</td></tr>
+          <tr><td><kbd>R</kbd></td><td>Cümleyi tekrar oynat</td></tr>
+          <tr><td><kbd>T</kbd></td><td>Cümleyi çevir</td></tr>
+          <tr><td><kbd>1</kbd> <kbd>2</kbd></td><td>Tekrar'da: Unuttum / Hatırladım</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Kartı kapat</td></tr>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="backdrop" id="backdrop"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true">
+  <div class="grip"></div>
+  <button class="sheet-close" data-act="close-sheet" aria-label="Kapat">✕</button>
+  <div id="sheetBody"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<input type="file" id="pickFiles" multiple accept="video/*,.mkv,.srt,.vtt" hidden>
+<input type="file" id="pickDir" webkitdirectory multiple hidden>
+<input type="file" id="pickImport" accept=".json,application/json" hidden>
+
+<script src="app.js"></script>
+</body>
+</html>

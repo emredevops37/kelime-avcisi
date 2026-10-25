@@ -1,0 +1,12 @@
+# Videolar ve altyazılar kişiseldir, yayınlanmaz
+videos/
+*.mp4
+*.mkv
+*.webm
+*.mov
+*.m4v
+*.srt
+*.vtt
+
+__pycache__/
+*.pyc
