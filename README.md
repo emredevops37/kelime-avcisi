@@ -3,6 +3,21 @@
 WordHunter'ın yerelde çalışan bir benzeri: altyazılı videoları kısa klipler hâlinde kaydır,
 altyazıdaki bilmediğin kelimeye dokun, o cümledeki anlamını gör, yakala ve aralıklı tekrarla öğren.
 
+Yayındaki sürüm: https://emredevops37.github.io/kelime-avcisi/
+
+## YouTube'dan izleme
+
+Videoyu indirmeden, YouTube'un resmî gömülü oynatıcısıyla izlenir:
+
+1. **YouTube linki ekle** düğmesine bas ya da Android'de YouTube'da **Paylaş → Kelime Avcısı**'nı seç
+   (paylaş menüsünde görünmesi için uygulamanın ana ekrana yüklü olması gerekir).
+2. Altyazıyı ver: **.srt / .vtt dosyası seç** ya da YouTube'da açıklamadaki **"Transkripti göster"** metnini kopyalayıp yapıştır.
+3. **Ekle ve izle.** Link ve altyazı tarayıcıda saklanır; video her açılışta akışta olur.
+
+- Altyazı YouTube'dan otomatik alınamaz: YouTube bunu yalnız kendi uygulamalarına izin veriyor.
+- Sahibinin başka sitelerde oynatılmasına kapattığı videolar (bazı müzik klipleri gibi) çalışmaz; uygulama bunu söyler.
+- İnternet gerekir. Bazı tarayıcılarda (özellikle iPhone) ilk oynatma için videoya doğrudan dokunmak gerekebilir.
+
 ## Çalıştırma
 
 `index.html` dosyasına çift tıkla (Chrome ya da Edge önerilir). Kurulum gerekmez.

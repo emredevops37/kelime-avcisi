@@ -408,14 +408,14 @@ function parseSubs(text) {
 const NOISE_CUE = /^[\s♪]*[[(][^\])]*[\])][\s♪]*$|^[\s♪]+$/;
 const ABBR_END = /\b(Mr|Mrs|Ms|Dr|St|Jr|Sr|vs|etc|e\.g|i\.e)\.$/i;
 const endsSentence = t => /[.?!…]["')\]]?$/.test(t) && !ABBR_END.test(t);
-function tidyCues(cues) {
+function tidyCues(cues, forceMerge = false) {
   cues = cues.filter(q => !NOISE_CUE.test(q.text));
   let overlaps = 0;
   for (let i = 0; i < cues.length - 1; i++) {
     const q = cues[i], next = cues[i + 1];
     if (next.start < q.end - .05) { overlaps++; q.end = Math.max(q.start + .3, next.start); }
   }
-  if (overlaps < cues.length * .3) return cues;
+  if (!forceMerge && overlaps < cues.length * .3) return cues;
 
   // Her parçayı cümle sınırlarından ve ">>" (konuşmacı değişimi) işaretlerinden böl,
   // parçanın süresini harf sayısına göre paylaştır.
@@ -573,7 +573,7 @@ async function loadFiles(list, { append = false, label = '' } = {}) {
       : 'Video ya da altyazı dosyası bulunamadı.', 6000);
     return;
   }
-  library = append ? library.filter(e => e.key !== 'demo').concat(entries) : entries;
+  library = (append ? library.filter(e => e.key !== 'demo') : library.filter(e => e.yt)).concat(entries);
   buildFeed();
   closeSheet();
   const clips = cards.length;
@@ -583,9 +583,150 @@ async function loadFiles(list, { append = false, label = '' } = {}) {
   if (noSub.length) console.info('Altyazısı bulunamayan videolar:', noSub);
 }
 function loadDemo() {
-  library = [{ key: 'demo', title: 'Örnek diyalog (videosuz)', video: null, cues: parseSubs(DEMO_SRT) }];
+  library = [{ key: 'demo', title: 'Örnek diyalog (videosuz)', video: null, cues: parseSubs(DEMO_SRT) }, ...library.filter(e => e.yt)];
   buildFeed();
   closeSheet();
+}
+
+/* ---------------- YouTube videoları ----------------
+   Video YouTube'dan oynar; altyazıyı kullanıcı verir (.srt/.vtt ya da "Transkripti göster" metni).
+   Link ve altyazı tarayıcıda saklanır, uygulama her açıldığında akışa gelir. */
+const loadYTStore = () => store.get('ka.yt', []);
+const ytEntry = v => ({ key: 'yt:' + v.id, yt: v.id, title: v.title, video: null, cues: v.cues.map(([start, end, text]) => ({ start, end, text })) });
+function parseYouTubeId(s) {
+  s = String(s || '').trim();
+  const m = s.match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^#\s]*&)?v=|embed\/|shorts\/|live\/|v\/))([\w-]{11})/);
+  if (m) return m[1];
+  return /^[\w-]{11}$/.test(s) ? s : null;
+}
+async function ytInfo(id) {
+  try {
+    const j = await fetchJSON('https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + id));
+    return { title: j.title, author: j.author_name };
+  } catch (e) { return { title: null, error: e.status }; }
+}
+/* YouTube "Transkripti göster" kopyası: "0:10" satırı + metin (ya da "0:10 metin") */
+const TS_LINE = /^\s*((?:\d{1,2}:)?\d{1,2}:\d{2})(?:\s+(.*))?$/;
+function parseTranscript(text) {
+  const raw = [];
+  for (const line of text.replace(/\r/g, '').split('\n')) {
+    const m = line.match(TS_LINE);
+    if (m) raw.push({ start: parseTime(m[1]), text: (m[2] || '').trim() });
+    else if (raw.length && line.trim()) {
+      const last = raw[raw.length - 1];
+      last.text += (last.text ? ' ' : '') + line.trim();
+    }
+  }
+  const cues = raw.filter(q => q.text).sort((a, b) => a.start - b.start);
+  cues.forEach((q, i) => {
+    const next = cues[i + 1];
+    q.end = next ? Math.min(next.start, q.start + 10) : q.start + 5;
+    if (q.end <= q.start) q.end = q.start + 1;
+  });
+  return tidyCues(cues, true);
+}
+const parseAnySubs = text => /-->/.test(text) ? parseSubs(text) : parseTranscript(text);
+
+function saveYouTube(id, title, cues) {
+  const list = loadYTStore().filter(v => v.id !== id);
+  const v = { id, title, addedAt: Date.now(), cues: cues.map(q => [+q.start.toFixed(2), +q.end.toFixed(2), q.text]) };
+  list.unshift(v);
+  if (!store.set('ka.yt', list)) { toast('Kaydedilemedi: tarayıcı depolaması dolu. Eski bir YouTube videosunu silmeyi dene.', 6000); return null; }
+  library = [ytEntry(v), ...library.filter(e => e.key !== 'yt:' + id && e.key !== 'demo')];
+  buildFeed();
+  return v;
+}
+function deleteYouTube(id) {
+  store.set('ka.yt', loadYTStore().filter(v => v.id !== id));
+  library = library.filter(e => e.key !== 'yt:' + id);
+  buildFeed();
+}
+
+let ytDraft = null;
+function openYouTubeAdd(link = '') {
+  const m = mounted.get(activeIdx);
+  if (m) m.player.pause();
+  ytDraft = { id: null, title: null, token: 0 };
+  openSheet(`
+    <div class="lib ytadd">
+      <h1>YouTube'dan ekle</h1>
+      <label class="label" for="ytUrl">Video linki</label>
+      <input class="field" id="ytUrl" type="url" inputmode="url" placeholder="https://youtu.be/…" value="${esc(link)}" autocomplete="off">
+      <div class="ytinfo" id="ytInfo"></div>
+      <div class="label">İngilizce altyazı</div>
+      <p class="hint">Altyazıyı <b>.srt / .vtt</b> dosyası olarak seç ya da YouTube'da videonun açıklamasındaki
+        <b>"Transkripti göster"</b> metnini kopyalayıp aşağıya yapıştır.</p>
+      <div class="btns"><button data-act="yt-file">.srt / .vtt dosyası seç</button></div>
+      <textarea class="field" id="ytText" rows="7" placeholder="0:10&#10;Hello everyone and welcome back…&#10;0:14&#10;…"></textarea>
+      <div class="hint" id="ytCount"></div>
+      <div class="lk-actions"><button class="primary" data-act="yt-save">Ekle ve izle</button></div>
+    </div>`);
+  const url = $('#ytUrl'), txt = $('#ytText');
+  let timer;
+  url.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(resolveYouTubeLink, 350); });
+  txt.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(countYouTubeCues, 300); });
+  if (link) resolveYouTubeLink(); else url.focus();
+}
+async function resolveYouTubeLink() {
+  const box = $('#ytInfo');
+  if (!box || !ytDraft) return;
+  const id = parseYouTubeId($('#ytUrl').value);
+  const token = ++ytDraft.token;
+  ytDraft.id = id; ytDraft.title = null;
+  if (!id) { box.innerHTML = $('#ytUrl').value.trim() ? '<p class="err">Bu bir YouTube video linkine benzemiyor.</p>' : ''; return; }
+  box.innerHTML = `<img src="https://i.ytimg.com/vi/${id}/mqdefault.jpg" alt=""><div><div class="skeleton sm"></div></div>`;
+  const info = await ytInfo(id);
+  if (token !== ytDraft.token) return;
+  ytDraft.title = info.title;
+  const saved = loadYTStore().some(v => v.id === id);
+  box.innerHTML = `<img src="https://i.ytimg.com/vi/${id}/mqdefault.jpg" alt="">
+    <div><b>${esc(info.title || 'YouTube videosu')}</b>
+    ${info.author ? `<div class="muted">${esc(info.author)}</div>` : ''}
+    ${info.error ? '<div class="err">Video bulunamadı, gizli ya da başka sitelerde oynatılmaya kapalı olabilir.</div>' : ''}
+    ${saved ? '<div class="muted">Bu video zaten ekli; kaydedersen altyazısı güncellenir.</div>' : ''}</div>`;
+}
+function countYouTubeCues() {
+  const t = $('#ytText')?.value || '';
+  const el = $('#ytCount');
+  if (!el) return;
+  if (!t.trim()) { el.textContent = ''; return; }
+  const n = parseAnySubs(t).length;
+  el.innerHTML = n ? `${n} cümle bulundu.` : '<span class="err">Zaman damgası bulunamadı. Metin "0:10" gibi zamanlar içermeli.</span>';
+}
+async function pickYouTubeSubFile() {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  if (!isTouch) inp.accept = '.srt,.vtt,text/vtt';
+  inp.onchange = async () => {
+    const f = inp.files[0];
+    if (!f) return;
+    $('#ytText').value = await readText(f);
+    countYouTubeCues();
+  };
+  inp.click();
+}
+function saveYouTubeDraft() {
+  const id = parseYouTubeId($('#ytUrl')?.value);
+  if (!id) return toast('Önce geçerli bir YouTube linki gir.');
+  const text = $('#ytText').value;
+  const cues = text.trim() ? parseAnySubs(text) : [];
+  if (!cues.length) return toast('Altyazı ekle: .srt dosyası seç ya da transkripti yapıştır.');
+  const title = (ytDraft?.id === id && ytDraft.title) || 'YouTube videosu';
+  if (!saveYouTube(id, title, cues)) return;
+  closeSheet();
+  const i = cards.findIndex(c => c.entry.key === 'yt:' + id);
+  if (i >= 0) { goTo(i); setActive(i); }
+  toast(`"${title}" eklendi: ${cues.length} cümle.`);
+}
+/* Android paylaş menüsünden gelen link (manifest share_target) */
+function takeSharedLink() {
+  const p = new URLSearchParams(location.search);
+  if (!['url', 'text', 'title'].some(k => p.has(k))) return null;
+  const s = ['url', 'text', 'title'].map(k => p.get(k) || '').join(' ');
+  history.replaceState(null, '', location.pathname);
+  const link = (s.match(/https?:\/\/\S+/g) || []).find(u => parseYouTubeId(u));
+  if (!link) toast('Paylaşılan bağlantıda YouTube videosu bulunamadı.');
+  return link || null;
 }
 async function filesFromHandle(dir, path = '', depth = 0) {
   const out = [];
@@ -660,9 +801,18 @@ async function libPanelHTML(inSheet) {
     ? `<div class="libstats">Şu an yüklü: ${library.length} kaynak, ${cards.length} klip.</div>` : '';
   const primary = serverVids ? 'server' : last ? 'last' : canPickDir ? 'dir' : 'files';
   const cls = k => k === primary ? 'primary' : '';
+  const yts = loadYTStore();
   return `<div class="lib">
     ${inSheet ? '<h1>Videolar</h1>' : '<h1>Kaydır, dokun, yakala.</h1>'}
     <p class="lead">Altyazılı videolarını aç; altyazıdaki bilmediğin kelimeye dokun, anlamını gör, hazinene ekle.</p>
+    <div class="ytbox">
+      <div><b>YouTube'dan izle</b><div class="muted">Video indirmeden: linki ve altyazısını ver.${isTouch ? ' YouTube\'da Paylaş → Kelime Avcısı da olur.' : ''}</div></div>
+      <button class="primary" data-act="yt-add">YouTube linki ekle</button>
+    </div>
+    ${yts.length ? `<ul class="ytlist">${yts.map(v => `<li>
+      <img src="https://i.ytimg.com/vi/${esc(v.id)}/default.jpg" alt="">
+      <span><b>${esc(v.title)}</b><small>${v.cues.length} cümle</small></span>
+      <button class="btn" data-act="yt-del" data-id="${esc(v.id)}" title="Sil">Sil</button></li>`).join('')}</ul>` : ''}
     <div class="drop" id="drop">
       <div><b>${isTouch ? 'Video ve altyazı dosyalarını seç' : 'Video ve altyazı dosyalarını buraya sürükle'}</b></div>
       <div class="muted">${isTouch ? 'videoyu ve .srt dosyasını birlikte işaretle' : 'ya da'}</div>
@@ -710,6 +860,131 @@ class TextPlayer extends EventTarget {
   }
 }
 
+/* ---------------- YouTube oynatıcı (resmî IFrame API) ----------------
+   HTMLVideoElement'in kullandığımız kısmını taklit eder: currentTime, paused, play/pause,
+   playbackRate, muted ve play/pause/ended olayları. */
+let ytApi = null;
+function loadYouTubeApi() {
+  if (window.YT?.Player) return Promise.resolve();
+  if (!ytApi) ytApi = new Promise((res, rej) => {
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => { if (prev) prev(); res(); };
+    const s = document.createElement('script');
+    s.src = 'https://www.youtube.com/iframe_api';
+    s.onerror = () => { ytApi = null; rej(new Error('YouTube oynatıcısı yüklenemedi. İnternet bağlantını kontrol et.')); };
+    document.head.appendChild(s);
+  });
+  return ytApi;
+}
+const YT_ERRORS = {
+  2: 'Geçersiz YouTube video kimliği.',
+  5: 'YouTube oynatıcısı bu videoyu oynatamadı.',
+  100: 'Video bulunamadı ya da gizli.',
+  101: 'Videonun sahibi başka sitelerde oynatılmasına izin vermiyor.',
+  150: 'Videonun sahibi başka sitelerde oynatılmasına izin vermiyor.',
+  153: 'YouTube oynatıcısı bu sayfada açılamadı.'
+};
+class YTPlayer extends EventTarget {
+  constructor(host, videoId, start = 0) {
+    super();
+    this.readyState = 0; this.duration = NaN; this.destroyed = false;
+    this._state = -1; this._want = false; this._rate = 1; this._muted = false;
+    this._seek = start; this._seekAt = 0; this._raw = start; this._rawAt = performance.now();
+    this.el = document.createElement('div');
+    this.el.className = 'yt-frame';
+    const inner = document.createElement('div');
+    this.el.appendChild(inner);
+    host.prepend(this.el);
+    loadYouTubeApi().then(() => {
+      if (this.destroyed) return;
+      this.p = new YT.Player(inner, {
+        videoId, width: '100%', height: '100%', host: 'https://www.youtube-nocookie.com',
+        playerVars: {
+          playsinline: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, iv_load_policy: 3, cc_load_policy: 0,
+          start: Math.floor(start), origin: location.origin
+        },
+        events: {
+          onReady: () => this._onReady(),
+          onStateChange: e => this._onState(e.data),
+          onError: e => this._fail(YT_ERRORS[e.data] || 'YouTube hatası: ' + e.data)
+        }
+      });
+    }).catch(e => this._fail(e.message));
+  }
+  _fail(message) {
+    const e = new Event('error');
+    e.message = message;
+    this.dispatchEvent(e);
+  }
+  _onReady() {
+    if (this.destroyed) return;
+    this.readyState = 4;
+    this.duration = this.p.getDuration() || NaN;
+    try { this.p.unloadModule('captions'); } catch { }  // YouTube'un kendi altyazısı bizimkiyle çakışmasın
+    this.playbackRate = this._rate;
+    this.muted = this._muted;
+    if (this._seek != null) { this.p.seekTo(this._seek, true); this._seekAt = performance.now(); }
+    if (this._want) this.p.playVideo();
+  }
+  _onState(s) {
+    this._state = s;
+    if (s === 1) { this.duration = this.p.getDuration() || this.duration; this.dispatchEvent(new Event('play')); }
+    else if (s === 2 || s === 0) {
+      this._want = false;
+      this.dispatchEvent(new Event('pause'));
+      if (s === 0) this.dispatchEvent(new Event('ended'));
+    }
+  }
+  get paused() { return !(this._state === 1 || this._want); }
+  get currentTime() {
+    if (!this.p || this.readyState < 4) return this._seek ?? 0;
+    const now = performance.now();
+    const raw = this.p.getCurrentTime() || 0;
+    // seekTo sonrası oynatıcı bir süre eski zamanı bildirir; o arada istenen zamanı kullan
+    if (this._seekAt && now - this._seekAt < 1500 && Math.abs(raw - this._seek) > 1) {
+      return this._seek + (this._state === 1 ? (now - this._seekAt) / 1000 * this._rate : 0);
+    }
+    this._seekAt = 0;
+    if (raw !== this._raw) { this._raw = raw; this._rawAt = now; }
+    // getCurrentTime ~4 kez/sn güncellenir; altyazı akıcı olsun diye aradaki zamanı tahmin et
+    return this._state === 1 ? raw + Math.min(.5, (now - this._rawAt) / 1000) * this._rate : raw;
+  }
+  set currentTime(v) {
+    this._seek = v;
+    this._seekAt = performance.now();
+    if (this.p && this.readyState >= 4) this.p.seekTo(v, true);
+  }
+  get playbackRate() { return this._rate; }
+  set playbackRate(r) {
+    this._rate = r;
+    if (!this.p || this.readyState < 4) return;
+    const rates = this.p.getAvailablePlaybackRates?.() || [r];
+    this.p.setPlaybackRate(rates.reduce((a, b) => Math.abs(b - r) < Math.abs(a - r) ? b : a));
+  }
+  get muted() { return this._muted; }
+  set muted(v) {
+    this._muted = v;
+    if (this.p && this.readyState >= 4) v ? this.p.mute() : this.p.unMute();
+  }
+  play() {
+    this._want = true;
+    if (this.p && this.readyState >= 4) this.p.playVideo();
+    return Promise.resolve();
+  }
+  pause() {
+    const was = !this.paused;
+    this._want = false;
+    if (this.p && this.readyState >= 4) this.p.pauseVideo();
+    if (was) this.dispatchEvent(new Event('pause'));
+  }
+  destroy() {
+    this.destroyed = true;
+    try { this.p?.destroy(); } catch { }
+    this.el.remove();
+  }
+}
+const hasMedia = e => !!(e && (e.video || e.yt));
+
 /* ---------------- akış ---------------- */
 const feedEl = $('#feed');
 let cards = [];
@@ -729,7 +1004,7 @@ function buildFeed() {
   activeIdx = -1;
   cards = [];
   for (const entry of library) {
-    entry.segments = segmentCues(entry.cues, !entry.video);
+    entry.segments = segmentCues(entry.cues, !hasMedia(entry));
     entry.segments.forEach((seg, si) => cards.push({ entry, seg, si }));
   }
   if (settings.shuffle) shuffle(cards);
@@ -751,7 +1026,7 @@ function makeCardEl(c, i) {
   const rate = wpm(c.seg);
   const pace = rate < 120 ? 'yavaş' : rate < 165 ? 'orta' : 'hızlı';
   el.innerHTML = `
-    <div class="stage">${c.entry.video ? '' : '<div class="textbg"><span>Videosuz · cümleler sesli okunur</span></div>'}<div class="tapzone" data-act="toggle"></div></div>
+    <div class="stage">${hasMedia(c.entry) ? '' : '<div class="textbg"><span>Videosuz · cümleler sesli okunur</span></div>'}<div class="tapzone" data-act="toggle"></div></div>
     <div class="playhint"><div>${icon('play', 44)}</div></div>
     <div class="meta">
       <div class="title">${esc(c.entry.title)}</div>
@@ -791,6 +1066,14 @@ function mount(k) {
     v.addEventListener('playing', () => setTimeout(() => checkAudio(v, c.entry), 2500));
     c.el.querySelector('.stage').prepend(v);
     player = v;
+  } else if (c.entry.yt) {
+    player = new YTPlayer(c.el.querySelector('.stage'), c.entry.yt, c.seg.start);
+    player.addEventListener('error', e => {
+      if (c.el.querySelector('.err-msg')) return;
+      c.el.querySelector('.stage').insertAdjacentHTML('beforeend', `<div class="err-msg">${esc(e.message)}</div>`);
+    });
+    player.addEventListener('ended', () => { if (k === activeIdx) onClipEnd(); });
+    player.addEventListener('play', () => c.el.classList.remove('yt-tap'));
   } else {
     player = new TextPlayer(c.seg.end);
     player.currentTime = c.seg.start;
@@ -798,7 +1081,7 @@ function mount(k) {
   player.muted = settings.muted;
   const m = { player, shownKey: null, shown: [], lastCue: null, trFor: -1, trText: '', speaking: false, spokenCue: -1, speakTok: 0 };
   player.addEventListener('play', () => c.el.classList.remove('is-paused'));
-  player.addEventListener('pause', () => { c.el.classList.add('is-paused'); if (!c.entry.video) resetNarration(m); });
+  player.addEventListener('pause', () => { c.el.classList.add('is-paused'); if (!hasMedia(c.entry)) resetNarration(m); });
   mounted.set(k, m);
 }
 /* Chrome AC3/E-AC3/DTS sesi çözemez: görüntü oynar ama ses gelmez. Bunu fark edip söyle. */
@@ -838,8 +1121,9 @@ function unmount(k) {
   if (!m) return;
   m.player.pause();
   if (m.player instanceof HTMLVideoElement) { m.player.removeAttribute('src'); m.player.load(); m.player.remove(); }
+  if (m.player instanceof YTPlayer) m.player.destroy();
   const c = cards[k];
-  if (c) { c.el.querySelector('.sub').innerHTML = ''; c.el.classList.add('is-paused'); c.el.querySelector('.err-msg')?.remove(); }
+  if (c) { c.el.querySelector('.sub').innerHTML = ''; c.el.classList.add('is-paused'); c.el.classList.remove('yt-tap'); c.el.querySelector('.err-msg')?.remove(); }
   mounted.delete(k);
 }
 function setActive(i) {
@@ -854,7 +1138,7 @@ function setActive(i) {
   m.player.currentTime = cards[i].seg.start;
   m.player.playbackRate = settings.rate;
   m.lastCue = null; m.trFor = -1;
-  if (!cards[i].entry.video) resetNarration(m);
+  if (!hasMedia(cards[i].entry)) resetNarration(m);
   if (currentView === 'feed' && !sheetOpen) playActive();
 }
 function playActive() {
@@ -862,6 +1146,15 @@ function playActive() {
   if (!m) return;
   const p = m.player.play();
   if (p && p.catch) p.catch(() => cards[activeIdx]?.el.classList.add('is-paused'));
+  if (m.player instanceof YTPlayer) {
+    // Bazı tarayıcılar (özellikle iPhone) YouTube'un ilk oynatmasında videoya doğrudan dokunulmasını ister
+    const idx = activeIdx;
+    setTimeout(() => {
+      if (idx === activeIdx && m.player._want && m.player._state !== 1 && m.player._state !== 3 && m.player.readyState >= 4) {
+        cards[idx].el.classList.add('yt-tap');
+      }
+    }, 2500);
+  }
 }
 function onClipEnd() {
   const c = cards[activeIdx], m = mounted.get(activeIdx);
@@ -869,7 +1162,7 @@ function onClipEnd() {
   if (settings.onEnd === 'next' && activeIdx < cards.length - 1) { m.player.pause(); goTo(activeIdx + 1); return; }
   m.player.currentTime = c.seg.start;
   m.lastCue = null;
-  if (!c.entry.video) resetNarration(m);
+  if (!hasMedia(c.entry)) resetNarration(m);
   playActive();
 }
 function goTo(i) {
@@ -887,7 +1180,7 @@ function tick() {
   const end = isFinite(seg.end) ? seg.end : (p.duration || Infinity);
   if (!p.paused && t >= end - .05) { onClipEnd(); return; }
   renderSubs(c, m, t);
-  if (!c.entry.video) narrate(c, m);
+  if (!hasMedia(c.entry)) narrate(c, m);
   const pct = isFinite(end) ? Math.min(100, Math.max(0, (t - seg.start) / (end - seg.start) * 100)) : 0;
   c.el.querySelector('.progress i').style.width = pct + '%';
 }
@@ -935,7 +1228,7 @@ function seekCue(delta) {
   if (i < 0) return;
   m.player.currentTime = Math.max(c.seg.start, cues[i].start - .15);
   m.lastCue = null; m.shownKey = null;
-  if (!c.entry.video) resetNarration(m);
+  if (!hasMedia(c.entry)) resetNarration(m);
   playActive();
 }
 async function translateLine() {
@@ -1132,7 +1425,7 @@ function replaySource(src, sentence) {
   if (src && c && m && c.entry.key === src.key && currentView === 'feed') {
     m.player.currentTime = Math.max(c.seg.start, src.start - .15);
     m.lastCue = null;
-    if (!c.entry.video) resetNarration(m);
+    if (!hasMedia(c.entry)) resetNarration(m);
     playActive();
     const stopAt = src.end + .1;
     const stop = () => {
@@ -1143,7 +1436,7 @@ function replaySource(src, sentence) {
     return;
   }
   const entry = src && libraryEntry(src.key);
-  if (entry?.video) return playClipInReview(entry, src);
+  if (hasMedia(entry)) return playClipInReview(entry, src);
   speak(sentence.replace(/\n/g, ' '));
 }
 
@@ -1193,7 +1486,7 @@ function renderReview() {
       <div class="src">${ex.source ? esc(ex.source.title) + (ex.source.start != null ? ' · ' + fmtTime(ex.source.start) : '') : ''}</div>
       <div class="rv-tools">
         <button class="btn" data-act="rv-say">${icon('vol', 16)} Kelimeyi dinle</button>
-        <button class="btn" data-act="rv-clip">${icon(entry?.video ? 'play' : 'vol', 16)} ${entry?.video ? 'Sahneyi oynat' : 'Cümleyi dinle'}</button>
+        <button class="btn" data-act="rv-clip">${icon(hasMedia(entry) ? 'play' : 'vol', 16)} ${hasMedia(entry) ? 'Sahneyi oynat' : 'Cümleyi dinle'}</button>
       </div>
       ${revealed ? `<div class="rv-back">
         <div class="chips" style="justify-content:center"><span class="chip ctx">${esc(meaning || '—')}</span>${alts.map(a => `<span class="chip">${esc(a)}</span>`).join('')}</div>
@@ -1217,10 +1510,24 @@ function gradeCurrent(ok) {
   if (!ok && rq.length) rq.push(rCur.id);
   nextReview();
 }
-let rvStop = null;
+let rvStop = null, rvYT = null;
 function playClipInReview(entry, src) {
   const v = $('#rvVideo');
   stopReviewVideo();
+  if (entry.yt) {
+    // Hazine ayrıntısından çağrıldıysa kartın içinde, değilse tekrar kartının üstünde göster
+    const host = currentView === 'review' ? $('#review .rv-card') : $('#sheetBody .wd-video');
+    if (!host) return;
+    const box = document.createElement('div');
+    box.className = 'rv-yt';
+    host.prepend(box);
+    const start = Math.max(0, src.start - .2), end = src.end + .2;
+    const p = new YTPlayer(box, entry.yt, start);
+    p.addEventListener('error', e => { box.innerHTML = `<div class="err-msg">${esc(e.message)}</div>`; });
+    p.play();
+    rvYT = { p, box, iv: setInterval(() => { if (p.readyState >= 4 && !p.paused && p.currentTime >= end) p.pause(); }, 100) };
+    return;
+  }
   v.hidden = false;
   v.src = urlFor(entry);
   v.currentTime = Math.max(0, src.start - .2);
@@ -1239,6 +1546,7 @@ function playClipInReview(entry, src) {
   }
 }
 function stopReviewVideo() {
+  if (rvYT) { clearInterval(rvYT.iv); rvYT.p.destroy(); rvYT.box.remove(); rvYT = null; }
   const v = $('#rvVideo');
   if (!v) return;
   v.pause();
@@ -1319,7 +1627,7 @@ function openWordDetail(id) {
       <p class="sent">${highlight(ex.sentence, ex.surface)}</p>
       ${ex.sentenceTr ? `<p class="sent-tr">${esc(ex.sentenceTr)}</p>` : ''}
       <div class="src"><span>${esc(ex.source?.title || '')}${ex.source?.start != null ? ' · ' + fmtTime(ex.source.start) : ''}</span>
-        <button class="link" data-act="wd-play" data-i="${i}">${icon(ex.source && libraryEntry(ex.source.key)?.video ? 'play' : 'vol', 16)} Dinle</button></div>
+        <button class="link" data-act="wd-play" data-i="${i}">${icon(ex.source && hasMedia(libraryEntry(ex.source.key)) ? 'play' : 'vol', 16)} Dinle</button></div>
     </div>`).join('')}
     ${w.meanings?.length ? `<div class="label">İngilizce sözlük</div><ul class="defs">${w.meanings.map(g => g.defs.slice(0, 2).map((x, j) =>
       `<li>${j === 0 ? `<span class="pos">${esc(POS_TR[g.pos] || g.pos)}</span>` : ''}${esc(x.d)}${x.ex ? `<span class="ex">“${esc(x.ex)}”</span>` : ''}</li>`).join('')).join('')}</ul>` : ''}
@@ -1335,7 +1643,7 @@ function openWordDetail(id) {
       'wd-play': el => {
         const ex = w.examples[+el.dataset.i];
         const entry = ex.source && libraryEntry(ex.source.key);
-        if (entry?.video) playClipInReview(entry, ex.source); else speak(ex.sentence.replace(/\n/g, ' '));
+        if (hasMedia(entry)) playClipInReview(entry, ex.source); else speak(ex.sentence.replace(/\n/g, ' '));
       },
       'wd-now': () => { w.due = Date.now(); saveWords(); closeSheet(); switchView('review'); },
       'wd-del': () => {
@@ -1379,6 +1687,15 @@ const actions = {
   'reopen-dir': reopenLastDir,
   'demo': loadDemo,
   'server-videos': loadServerVideos,
+  'yt-add': () => openYouTubeAdd(),
+  'yt-file': pickYouTubeSubFile,
+  'yt-save': saveYouTubeDraft,
+  'yt-del': async el => {
+    const v = loadYTStore().find(x => x.id === el.dataset.id);
+    if (!v || !confirm(`"${v.title}" listeden silinsin mi? Yakaladığın kelimeler hazinende kalır.`)) return;
+    deleteYouTube(v.id);
+    if (sheetOpen) actions['open-lib']();
+  },
   'open-lib': async () => {
     const m = mounted.get(activeIdx); if (m) m.player.pause();
     openSheet(await libPanelHTML(true));
@@ -1399,7 +1716,7 @@ const actions = {
     const ex = rCur?.examples[0];
     if (!ex) return;
     const entry = ex.source && libraryEntry(ex.source.key);
-    if (entry?.video) playClipInReview(entry, ex.source); else speak(ex.sentence.replace(/\n/g, ' '));
+    if (hasMedia(entry)) playClipInReview(entry, ex.source); else speak(ex.sentence.replace(/\n/g, ' '));
   },
   'word-detail': el => openWordDetail(el.dataset.id),
   'export': () => {
@@ -1575,7 +1892,15 @@ applyTheme();
 // Android, .srt uzantısını bir türe eşleyemeyince altyazı dosyalarını seçilemez gösteriyor
 if (isTouch) $('#pickFiles').removeAttribute('accept');
 updateBadges();
+library = loadYTStore().map(ytEntry);
 buildFeed();
 requestAnimationFrame(tick);
 setInterval(updateBadges, MIN);
 if ('speechSynthesis' in window) speechSynthesis.getVoices();
+{
+  const shared = takeSharedLink();
+  const id = shared && parseYouTubeId(shared);
+  const i = id ? cards.findIndex(c => c.entry.key === 'yt:' + id) : -1;
+  if (i >= 0) { goTo(i); toast('Bu video zaten ekli; kaldığın yerden izleyebilirsin.'); }
+  else if (shared) openYouTubeAdd(shared);
+}
