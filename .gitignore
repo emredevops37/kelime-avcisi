@@ -10,3 +10,6 @@ videos/
 
 __pycache__/
 *.pyc
+
+# Claude Code'un yerel proje notları
+CLAUDE.md
