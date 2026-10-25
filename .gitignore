@@ -7,6 +7,8 @@ videos/
 *.m4v
 *.srt
 *.vtt
+# Uygulamadaki açık lisanslı örnek sahne yayınlanır
+!demo/tears-of-steel.mp4
 
 __pycache__/
 *.pyc

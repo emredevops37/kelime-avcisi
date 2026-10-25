@@ -107,6 +107,7 @@ main { flex: 1; min-height: 0; position: relative; }
 }
 .meta .title { font-weight: 700; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .meta .info { font-size: 13px; opacity: .8; }
+.meta .credit { font-size: 11px; opacity: .6; margin-top: 2px; }
 .sub {
   position: absolute; left: 50%; transform: translateX(-50%); bottom: 48px; z-index: 3;
   width: min(86%, 960px); text-align: center; pointer-events: none;

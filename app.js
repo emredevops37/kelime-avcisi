@@ -209,6 +209,9 @@ function lineHTML(line, curSurface) {
 /* ---------------- sözlük ve çeviri ---------------- */
 const cache = store.get('ka.cache', { dict: {}, tr: {} });
 cache.dict ||= {}; cache.tr ||= {};
+// Eski sürümün önbelleğe ve hazineye yazdığı tanımlardaki Wiktionary stil kodunu temizle
+const WIKI_CSS = /\.mw-parser-output[^{}]*\{[^}]*\}\s*/g;
+for (const m of [...Object.values(cache.dict), ...words]) for (const g of m.meanings || []) for (const x of g.defs) x.d = x.d.replace(WIKI_CSS, '').trim();
 let cacheTimer;
 function saveCache() {
   clearTimeout(cacheTimer);
@@ -226,7 +229,13 @@ async function fetchJSON(url) {
   return r.json();
 }
 /* İngilizce sözlük: Wiktionary (anlamlar + örnekler), Datamuse (IPA telaffuz) */
-const htmlText = h => new DOMParser().parseFromString(h || '', 'text/html').body.textContent.replace(/\s+/g, ' ').trim();
+// Wiktionary tanımlarında <style> gelebiliyor; metne karışmasın
+function htmlDoc(h) {
+  const doc = new DOMParser().parseFromString(h || '', 'text/html');
+  doc.querySelectorAll('style, script, link').forEach(e => e.remove());
+  return doc;
+}
+const htmlText = h => htmlDoc(h).body.textContent.replace(/\s+/g, ' ').trim();
 const INFLECTION = /participle|past|plural|singular|third-person|comparative|superlative|gerund|present|inflection/i;
 async function wiktionary(title) {
   const r = await fetch('https://en.wiktionary.org/api/rest_v1/page/definition/' + encodeURIComponent(title));
@@ -241,7 +250,7 @@ function parseWikt(en) {
   for (const sec of en) {
     const pos = (sec.partOfSpeech || '').toLowerCase();
     for (const d of sec.definitions || []) {
-      const doc = new DOMParser().parseFromString(d.definition || '', 'text/html');
+      const doc = htmlDoc(d.definition);
       const text = doc.body.textContent.replace(/\s+/g, ' ').trim();
       if (!text) continue;
       const fo = doc.querySelector('.form-of-definition');
@@ -541,6 +550,51 @@ during the meeting.
 No promises. I can barely keep my eyes open.
 `;
 
+/* Videolu örnek: Tears of Steel'in açılış sahnesi (filmde 0:20-0:46). Film CC BY 3.0, kaynak belirtmek gerekir.
+   Altyazı filmin resmî İngilizce altyazısı, kesilen parçanın başına göre kaydırıldı. */
+const DEMO_VIDEO = { name: 'tears-of-steel.mp4', url: 'demo/tears-of-steel.mp4' };
+const DEMO_VIDEO_CREDIT = 'Tears of Steel · (CC) Blender Foundation · mango.blender.org · CC BY 3.0';
+const DEMO_VIDEO_SRT = `1
+00:00:03,000 --> 00:00:04,500
+You're a jerk, Thom.
+
+2
+00:00:05,000 --> 00:00:07,000
+Look Celia, we have to follow our passions;
+
+3
+00:00:07,000 --> 00:00:10,500
+...you have your robotics, and I
+just want to be awesome in space.
+
+4
+00:00:10,800 --> 00:00:14,000
+Why don't you just admit that
+you're freaked out by my robot hand?
+
+5
+00:00:14,500 --> 00:00:16,000
+I'm not freaked out by- it's...
+
+6
+00:00:17,000 --> 00:00:18,000
+...alright! Fine!
+
+7
+00:00:18,000 --> 00:00:21,000
+I'm freaked out! I have nightmares
+that I'm being chased...
+
+8
+00:00:21,000 --> 00:00:22,000
+...by these giant robotic claws of death...
+
+9
+00:00:22,200 --> 00:00:25,000
+Whatever, Thom. We're done.
+`;
+const isDemo = e => e.key.startsWith('demo');
+
 async function loadFiles(list, { append = false, label = '' } = {}) {
   const vids = list.filter(it => VIDEO_EXT.test(it.file.name));
   const subs = list.filter(it => SUB_EXT.test(it.file.name)).map(s => ({
@@ -573,7 +627,7 @@ async function loadFiles(list, { append = false, label = '' } = {}) {
       : 'Video ya da altyazı dosyası bulunamadı.', 6000);
     return;
   }
-  library = (append ? library.filter(e => e.key !== 'demo') : library.filter(e => e.yt)).concat(entries);
+  library = (append ? library.filter(e => !isDemo(e)) : library.filter(e => e.yt)).concat(entries);
   buildFeed();
   closeSheet();
   const clips = cards.length;
@@ -583,7 +637,11 @@ async function loadFiles(list, { append = false, label = '' } = {}) {
   if (noSub.length) console.info('Altyazısı bulunamayan videolar:', noSub);
 }
 function loadDemo() {
-  library = [{ key: 'demo', title: 'Örnek diyalog (videosuz)', video: null, cues: parseSubs(DEMO_SRT) }, ...library.filter(e => e.yt)];
+  library = [
+    { key: 'demo-video', title: 'Örnek sahne: Tears of Steel', credit: DEMO_VIDEO_CREDIT, video: DEMO_VIDEO, cues: parseSubs(DEMO_VIDEO_SRT) },
+    { key: 'demo', title: 'Örnek diyalog (videosuz)', video: null, cues: parseSubs(DEMO_SRT) },
+    ...library.filter(e => e.yt)
+  ];
   buildFeed();
   closeSheet();
 }
@@ -632,7 +690,7 @@ function saveYouTube(id, title, cues) {
   const v = { id, title, addedAt: Date.now(), cues: cues.map(q => [+q.start.toFixed(2), +q.end.toFixed(2), q.text]) };
   list.unshift(v);
   if (!store.set('ka.yt', list)) { toast('Kaydedilemedi: tarayıcı depolaması dolu. Eski bir YouTube videosunu silmeyi dene.', 6000); return null; }
-  library = [ytEntry(v), ...library.filter(e => e.key !== 'yt:' + id && e.key !== 'demo')];
+  library = [ytEntry(v), ...library.filter(e => e.key !== 'yt:' + id && !isDemo(e))];
   buildFeed();
   return v;
 }
@@ -1035,6 +1093,7 @@ function makeCardEl(c, i) {
     <div class="meta">
       <div class="title">${esc(c.entry.title)}</div>
       <div class="info">${n > 1 ? `Klip ${c.si + 1}/${n} · ` : ''}${fmtTime(c.seg.start)} · ~${rate} kelime/dk (${pace})</div>
+      ${c.entry.credit ? `<div class="credit">${esc(c.entry.credit)}</div>` : ''}
     </div>
     <div class="sub"></div>
     <div class="side">
@@ -1833,7 +1892,7 @@ document.addEventListener('drop', async e => {
     else if (h?.kind === 'file') { usedHandles = true; const f = await h.getFile(); items.push({ file: f, path: f.name }); }
   }
   const list = usedHandles ? items : plain;
-  if (list.length) loadFiles(list, { append: library.length > 0 && library[0].key !== 'demo' && sheetOpen });
+  if (list.length) loadFiles(list, { append: library.length > 0 && !isDemo(library[0]) && sheetOpen });
 });
 
 document.addEventListener('keydown', e => {
