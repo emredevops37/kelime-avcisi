@@ -630,6 +630,7 @@ async function loadFiles(list, { append = false, label = '' } = {}) {
   library = (append ? library.filter(e => !isDemo(e)) : library.filter(e => e.yt)).concat(entries);
   buildFeed();
   closeSheet();
+  showHome(false);
   const clips = cards.length;
   let msg = `${entries.length} kaynak, ${clips} klip yüklendi${label ? ' (' + label + ')' : ''}.`;
   if (noSub.length) msg += ` Altyazısı bulunamayan ${noSub.length} video atlandı.`;
@@ -644,6 +645,7 @@ function loadDemo() {
   ];
   buildFeed();
   closeSheet();
+  showHome(false);
 }
 
 /* ---------------- YouTube videoları ----------------
@@ -772,6 +774,7 @@ function saveYouTubeDraft() {
   const title = (ytDraft?.id === id && ytDraft.title) || 'YouTube videosu';
   if (!saveYouTube(id, title, cues)) return;
   closeSheet();
+  showHome(false);
   const i = cards.findIndex(c => c.entry.key === 'yt:' + id);
   if (i >= 0) { goTo(i); setActive(i); }
   toast(`"${title}" eklendi: ${cues.length} cümle.`);
@@ -852,6 +855,12 @@ async function loadServerVideos() {
   await loadFiles(items, { label: 'bilgisayardaki videos klasörü' });
 }
 
+const HOWTO = [
+  ['1-izle', 'İzle', 'Videolar ~1 dakikalık kliplere bölünür; dikey kaydırarak izlersin.'],
+  ['2-dokun', 'Dokun', 'Altyazıda bilmediğin kelimeye dokun: anlamı ve cümlenin çevirisi gelir.'],
+  ['3-yakala', 'Yakala', 'Kelime hazinene girer, artık her altyazıda altın renginde görünür.'],
+  ['4-tekrar', 'Tekrarla', '"Hatırladım" dedikçe kelime ham madenden altına, altından mücevhere döner.']
+];
 async function libPanelHTML(inSheet) {
   const last = window.showDirectoryPicker ? await idbGet('lastDir') : null;
   const serverVids = (await listServerVideos() || []).filter(n => VIDEO_EXT.test(n)).length;
@@ -860,9 +869,20 @@ async function libPanelHTML(inSheet) {
   const primary = serverVids ? 'server' : last ? 'last' : canPickDir ? 'dir' : 'files';
   const cls = k => k === primary ? 'primary' : '';
   const yts = loadYTStore();
-  return `<div class="lib">
+  const home = inSheet ? '' : `
+    <div class="btns hero">
+      ${cards.length ? '<button class="primary" data-act="resume-feed">Akışa dön</button>' : ''}
+      <button class="${cards.length ? '' : 'primary'}" data-act="demo">Örnekle dene</button>
+    </div>
+    <h2 class="sec">Nasıl çalışır?</h2>
+    <ol class="howto">${HOWTO.map(([img, t, d], i) => `<li>
+      <img src="img/nasil-${img}.webp" width="360" height="394" alt="" loading="lazy">
+      <b>${i + 1}. ${t}</b><span>${d}</span></li>`).join('')}</ol>
+    <h2 class="sec">Kendi videolarınla başla</h2>`;
+  return `<div class="lib${inSheet ? '' : ' home'}">
     ${inSheet ? '<h1>Videolar</h1>' : '<h1>Kaydır, dokun, yakala.</h1>'}
-    <p class="lead">Altyazılı videolarını aç; altyazıdaki bilmediğin kelimeye dokun, anlamını gör, hazinene ekle.</p>
+    <p class="lead">Altyazılı videolarla İngilizce öğren: altyazıdaki bilmediğin kelimeye dokun, anlamını gör, hazinene ekle.</p>
+    ${home}
     <div class="ytbox">
       <div><b>YouTube'dan izle</b><div class="muted">Video indirmeden: linki ve altyazısını ver.${isTouch ? ' YouTube\'da Paylaş → Kelime Avcısı da olur.' : ''}</div></div>
       <button class="primary" data-act="yt-add">YouTube linki ekle</button>
@@ -880,7 +900,7 @@ async function libPanelHTML(inSheet) {
         ${canPickDir ? `<button class="${cls('dir')}" data-act="pick-dir">Klasör seç</button>` : ''}
         <button class="${cls('files')}" data-act="pick-files">Dosya seç</button>
         ${inSheet && library.length ? '<button data-act="add-files">Mevcutlara ekle</button>' : ''}
-        <button data-act="demo">Örnekle dene</button>
+        ${inSheet ? '<button data-act="demo">Örnekle dene</button>' : ''}
       </div>
     </div>
     <ol class="steps">
@@ -1074,10 +1094,7 @@ function buildFeed() {
   cards.forEach((c, i) => { c.el = makeCardEl(c, i); frag.appendChild(c.el); });
   feedEl.appendChild(frag);
   cards.forEach(c => io.observe(c.el));
-  const has = cards.length > 0;
-  $('#welcome').classList.toggle('on', !has);
-  $('#libBtn').hidden = !has;
-  if (!has) renderWelcome();
+  showHome(homeOpen);
   feedEl.scrollTop = 0;
 }
 function makeCardEl(c, i) {
@@ -1204,7 +1221,7 @@ function setActive(i) {
   m.player.playbackRate = settings.rate;
   m.lastCue = null; m.trFor = -1;
   if (!hasMedia(cards[i].entry)) resetNarration(m);
-  if (currentView === 'feed' && !sheetOpen) playActive();
+  if (currentView === 'feed' && !sheetOpen && !homeOpen) playActive();
 }
 function playActive() {
   const m = mounted.get(activeIdx);
@@ -1238,7 +1255,7 @@ function goTo(i) {
 
 function tick() {
   requestAnimationFrame(tick);
-  if (currentView !== 'feed') return;
+  if (currentView !== 'feed' || homeOpen) return;
   const c = cards[activeIdx], m = mounted.get(activeIdx);
   if (!c || !m) return;
   const p = m.player, seg = c.seg;
@@ -1723,16 +1740,32 @@ function openWordDetail(id) {
 
 /* ---------------- görünümler ---------------- */
 let currentView = 'feed';
+/* Ana sayfa (karşılama) akışın üstünde açılır; akış yüklüyse arkada duraklatılmış bekler. Akış boşsa hep açıktır. */
+let homeOpen = false;
+const markTab = v => $$('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.view === v));
+function showHome(on) {
+  homeOpen = on || !cards.length;
+  if (homeOpen) {
+    const m = mounted.get(activeIdx);
+    if (m) m.player.pause();
+    renderWelcome();
+  }
+  $('#welcome').classList.toggle('on', homeOpen);
+  $('#libBtn').hidden = homeOpen;
+  if (currentView === 'feed') markTab(homeOpen ? 'home' : 'feed');
+}
 function switchView(v) {
+  const home = v === 'home';
+  if (home) v = 'feed';
   if (v !== 'feed') { const m = mounted.get(activeIdx); if (m) m.player.pause(); }
   if (v !== 'review') stopReviewVideo();
   closeSheet();
   currentView = v;
-  $$('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.view === v));
+  markTab(v);
   $$('.view').forEach(s => s.classList.toggle('on', s.id === v + 'View'));
   if (v === 'review') startReview();
   if (v === 'treasure') renderTreasure();
-  if (v === 'feed') { const m = mounted.get(activeIdx); if (m) m.shownKey = null; }
+  if (v === 'feed') { const m = mounted.get(activeIdx); if (m) m.shownKey = null; showHome(home); }
 }
 function updateBadges() {
   const d = dueWords().length;
@@ -1752,6 +1785,7 @@ const actions = {
   'add-files': () => { $('#pickFiles').dataset.append = '1'; $('#pickFiles').click(); },
   'reopen-dir': reopenLastDir,
   'demo': loadDemo,
+  'resume-feed': () => { switchView('feed'); playActive(); },
   'server-videos': loadServerVideos,
   'yt-add': () => openYouTubeAdd(),
   'yt-file': pickYouTubeSubFile,
@@ -1903,7 +1937,7 @@ document.addEventListener('keydown', e => {
     else if (revealed && (e.key === '1' || e.key === '2')) gradeCurrent(e.key === '2');
     return;
   }
-  if (currentView !== 'feed' || sheetOpen || !cards.length) return;
+  if (currentView !== 'feed' || homeOpen || sheetOpen || !cards.length) return;
   const map = {
     ' ': togglePlay, k: togglePlay,
     ArrowDown: () => goTo(activeIdx + 1), PageDown: () => goTo(activeIdx + 1), j: () => goTo(activeIdx + 1),

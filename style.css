@@ -47,7 +47,19 @@ header.top {
   display: flex; align-items: center; gap: 12px; padding: 8px 16px;
   background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap;
 }
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 18px; }
+.brand {
+  display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 18px;
+  border: 0; background: none; padding: 2px; border-radius: 999px;
+}
+nav.tabs button.home { padding: 7px 10px; }
+nav.tabs .ic-set { display: none; }
+/* Çok dar ekranda, rozetler büyüyünce sığsın diye Ayarlar yazısı yerine dişli */
+@media (max-width: 400px) {
+  nav.tabs .ic-set { display: block; }
+  nav.tabs [data-view="settings"] span { display: none; }
+  header.top { padding: 6px 4px; }
+  nav.tabs button, nav.tabs button.home { padding: 7px 6px; gap: 4px; font-size: 15px; }
+}
 nav.tabs { display: flex; gap: 2px; margin-left: auto; }
 nav.tabs button {
   border: 0; background: transparent; padding: 7px 12px; border-radius: 999px; font-weight: 600; color: var(--muted);
@@ -63,8 +75,8 @@ nav.tabs button.on { background: var(--accent-soft); color: var(--text); }
 [hidden] { display: none !important; }
 @media (max-width: 520px) {
   header.top { padding: 6px 10px; }
-  .brand span { display: none; }
-  nav.tabs { margin-left: 0; width: calc(100% - 40px); justify-content: space-between; }
+  .brand { display: none; }  /* dar ekranda logo yerine ev simgesi ana sayfaya götürür */
+  nav.tabs { margin-left: 0; width: 100%; justify-content: space-between; }
   nav.tabs button { padding: 7px 9px; }
 }
 
@@ -148,7 +160,8 @@ main { flex: 1; min-height: 0; position: relative; }
 .libbtn:hover { background: rgba(255, 255, 255, .3); }
 
 /* ---------- karşılama / kütüphane ---------- */
-.welcome { position: absolute; inset: 0; overflow: auto; background: var(--bg); color: var(--text); display: none; }
+/* z-index: akış yüklüyken ana sayfa, kartın altyazı ve düğmelerinin (z-index 3) üstünde kalsın */
+.welcome { position: absolute; inset: 0; z-index: 6; overflow: auto; background: var(--bg); color: var(--text); display: none; }
 .welcome.on { display: block; }
 .lib { max-width: 640px; margin: 0 auto; padding: 32px 16px 48px; }
 .lib h1 { font-size: 28px; margin: 0 0 6px; }
@@ -163,6 +176,17 @@ main { flex: 1; min-height: 0; position: relative; }
 .steps li { margin: 6px 0; }
 .steps code { background: var(--surface-2); padding: 1px 6px; border-radius: 5px; color: var(--text); font-size: 14px; }
 .libstats { margin-top: 16px; font-size: 14px; color: var(--muted); }
+.lib.home { max-width: 760px; }
+.hero { margin-bottom: 4px; }
+.hero button { padding: 11px 22px; font-size: 16px; }
+.lib .sec { font-size: 19px; margin: 30px 0 12px; }
+.howto { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.howto li { display: flex; flex-direction: column; gap: 3px; }
+.howto img {
+  width: 100%; height: auto; border-radius: 14px; border: 1px solid var(--border); background: #000; margin-bottom: 6px;
+}
+.howto span { font-size: 14px; line-height: 1.35; color: var(--muted); }
+@media (max-width: 640px) { .howto { grid-template-columns: repeat(2, 1fr); } }
 
 /* ---------- YouTube ---------- */
 .yt-frame, .yt-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
@@ -177,6 +201,7 @@ main { flex: 1; min-height: 0; position: relative; }
   background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 16px; padding: 14px 16px; margin-bottom: 14px;
 }
 .ytbox .muted { font-size: 14px; }
+.ytbox button { padding: 9px 16px; border-radius: 12px; font-weight: 600; border: 1px solid var(--accent); }
 .ytlist { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 8px; }
 .ytlist li {
   display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--border);
