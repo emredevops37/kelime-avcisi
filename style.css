@@ -170,6 +170,7 @@ main { flex: 1; min-height: 0; position: relative; }
 .clip.yt-tap .playhint div { width: auto; height: auto; border-radius: 12px; padding: 10px 16px; font-weight: 600; }
 .clip.yt-tap .playhint div svg { display: none; }
 .clip.yt-tap .playhint div::after { content: "Başlatmak için videoya dokun"; }
+.clip.has-err .playhint { display: none; }  /* hata yazısının üstüne oynat işareti binmesin */
 .ytbox {
   display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
   background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 16px; padding: 14px 16px; margin-bottom: 14px;

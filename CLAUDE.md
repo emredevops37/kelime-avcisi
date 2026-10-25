@@ -27,4 +27,4 @@ Yayın: https://emredevops37.github.io/kelime-avcisi/ (GitHub Pages, `main` dal�
 Ayrıntılı notlar depo dışında, sahibinin Obsidian kasasında: `~/Desktop/Emre/Obsidian-Kasa/Kelime Avcısı/`
 - `Durum.md`: her oturumun başında oku
 - `Kararlar.md`, `Mimari.md`, `Yapılacaklar.md`: gerektiğinde oku
-- Oturum sonunda istenirse `Durum.md`'yi, `Yapılacaklar.md`'yi ve `Oturumlar/` altına o günün özetini güncelle
+- Oturum sonunda istenirse `Durum.md`'yi, `Yapılacaklar.md`'yi ve `Oturumlar/` altına o günün özetini güncelle , eğer sence gerekirse bu güncellemeleri tavsiye et.

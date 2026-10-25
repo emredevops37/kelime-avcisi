@@ -923,11 +923,15 @@ class YTPlayer extends EventTarget {
     try { this.p.unloadModule('captions'); } catch { }  // YouTube'un kendi altyazısı bizimkiyle çakışmasın
     this.playbackRate = this._rate;
     this.muted = this._muted;
-    if (this._seek != null) { this.p.seekTo(this._seek, true); this._seekAt = performance.now(); }
+    // seekTo henüz başlamamış oynatıcıyı kendiliğinden oynatır; komşu (önceden yüklenen) kartta yapma,
+    // konumu zaten playerVars.start veriyor
+    if (this._want && this._seek != null) { this.p.seekTo(this._seek, true); this._seekAt = performance.now(); }
     if (this._want) this.p.playVideo();
   }
   _onState(s) {
     this._state = s;
+    // İstenmeden başladıysa (ör. etkin olmayan kartta seekTo) durdur: yoksa arkada başka videoyla üst üste çalar
+    if ((s === 1 || s === 3) && !this._want) { this.p.pauseVideo(); return; }
     if (s === 1) { this.duration = this.p.getDuration() || this.duration; this.dispatchEvent(new Event('play')); }
     else if (s === 2 || s === 0) {
       this._want = false;
@@ -1059,6 +1063,7 @@ function mount(k) {
     v.currentTime = c.seg.start;
     v.addEventListener('error', () => {
       if (c.el.querySelector('.err-msg')) return;
+      c.el.classList.add('has-err');
       c.el.querySelector('.stage').insertAdjacentHTML('beforeend',
         `<div class="err-msg">Bu video tarayıcıda oynatılamıyor.<br>Dosya biçimi ya da codec (ör. HEVC/H.265, AC3 ses) desteklenmiyor olabilir. MP4 (H.264 + AAC) en sorunsuz seçenektir.</div>`);
     });
@@ -1070,6 +1075,7 @@ function mount(k) {
     player = new YTPlayer(c.el.querySelector('.stage'), c.entry.yt, c.seg.start);
     player.addEventListener('error', e => {
       if (c.el.querySelector('.err-msg')) return;
+      c.el.classList.add('has-err');
       c.el.querySelector('.stage').insertAdjacentHTML('beforeend', `<div class="err-msg">${esc(e.message)}</div>`);
     });
     player.addEventListener('ended', () => { if (k === activeIdx) onClipEnd(); });
@@ -1123,7 +1129,7 @@ function unmount(k) {
   if (m.player instanceof HTMLVideoElement) { m.player.removeAttribute('src'); m.player.load(); m.player.remove(); }
   if (m.player instanceof YTPlayer) m.player.destroy();
   const c = cards[k];
-  if (c) { c.el.querySelector('.sub').innerHTML = ''; c.el.classList.add('is-paused'); c.el.classList.remove('yt-tap'); c.el.querySelector('.err-msg')?.remove(); }
+  if (c) { c.el.querySelector('.sub').innerHTML = ''; c.el.classList.add('is-paused'); c.el.classList.remove('yt-tap', 'has-err'); c.el.querySelector('.err-msg')?.remove(); }
   mounted.delete(k);
 }
 function setActive(i) {
@@ -1150,7 +1156,8 @@ function playActive() {
     // Bazı tarayıcılar (özellikle iPhone) YouTube'un ilk oynatmasında videoya doğrudan dokunulmasını ister
     const idx = activeIdx;
     setTimeout(() => {
-      if (idx === activeIdx && m.player._want && m.player._state !== 1 && m.player._state !== 3 && m.player.readyState >= 4) {
+      if (idx === activeIdx && m.player._want && m.player._state !== 1 && m.player._state !== 3 && m.player.readyState >= 4
+        && !cards[idx].el.classList.contains('has-err')) {
         cards[idx].el.classList.add('yt-tap');
       }
     }, 2500);

@@ -1,7 +1,7 @@
 /* Kelime Avcısı service worker: uygulamanın kendisini çevrimdışı açılabilir tutar.
    Önce ağdan dener (güncellemeler hemen gelsin), ağ yoksa önbellekten verir.
    Sözlük/çeviri istekleri ve videolar hiç önbelleğe alınmaz. */
-const CACHE = 'kelime-avcisi-v2';
+const CACHE = 'kelime-avcisi-v3';
 const SHELL = [
   './', './index.html', './app.js', './style.css', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png'
